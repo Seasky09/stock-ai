@@ -490,6 +490,93 @@ def format_report(
     return "\n".join(lines)
 
 
+def _truncate_line(text: str, max_len: int = 100) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= max_len:
+        return compact
+    return compact[: max_len - 1].rstrip() + "…"
+
+
+def _fit_telegram_length(text: str, limit: int = 2500) -> str:
+    if len(text) <= limit:
+        return text
+    # Keep structure while shrinking each over-long item line first.
+    lines = text.splitlines()
+    reduced: List[str] = []
+    for line in lines:
+        if line.startswith("- "):
+            reduced.append(_truncate_line(line, max_len=80))
+        else:
+            reduced.append(line)
+    shrunk = "\n".join(reduced)
+    if len(shrunk) <= limit:
+        return shrunk
+    return shrunk[: limit - 1].rstrip() + "…"
+
+
+def format_telegram_summary(
+    news: List[NewsItem],
+    signals: List[StockSignal],
+    theme_count: Dict[str, int],
+    fetch_status: str,
+) -> str:
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    short_candidates = sorted(signals, key=lambda x: x.score_short, reverse=True)[:3]
+    long_candidates = sorted(signals, key=lambda x: x.score_long, reverse=True)[:3]
+    sell_watch = [
+        s
+        for s in signals
+        if (s.momentum_20d < -5 and s.volume_ratio > 1.3)
+        or (s.sentiment < -2)
+        or (s.volume_ratio > 3 and s.momentum_20d > 15)
+    ]
+    sell_watch = sorted(sell_watch, key=lambda x: x.momentum_20d)[:3]
+
+    lines = [f"🇰🇷 한국 증시 요약 ({today})", ""]
+    lines.append("📈 시장 요약")
+    lines.append(f"- 핵심 이슈: {_truncate_line(macro_summary(news), max_len=110)}")
+    lines.append(f"- 수집 뉴스 {len(news)}건 / 테마 상위: {', '.join(sorted(theme_count, key=theme_count.get, reverse=True)[:3])}")
+    if fetch_status != "live":
+        lines.append("- 안내: 외부 뉴스 일부 제한으로 보조 데이터 기반 포함")
+
+    lines.extend(["", "⚡ 단기 후보"])
+    if short_candidates:
+        for s in short_candidates:
+            lines.append(
+                f"- {s.name}: 모멘텀 {s.momentum_20d:.1f}% · 거래량 {s.volume_ratio:.2f}배 · 리스크 {s.risk}"
+            )
+    else:
+        lines.append("- 후보 데이터 없음")
+
+    lines.extend(["", "🌱 장기 후보"])
+    if long_candidates:
+        for s in long_candidates:
+            lines.append(
+                f"- {s.name}: 장기점수 {s.score_long:.1f} · 모멘텀 {s.momentum_20d:.1f}% · 리스크 {s.risk}"
+            )
+    else:
+        lines.append("- 후보 데이터 없음")
+
+    lines.extend(["", "🚨 매도 경고"])
+    if sell_watch:
+        for s in sell_watch:
+            reason = "거래량 동반 하락" if s.momentum_20d < -5 and s.volume_ratio > 1.3 else "리스크 확대"
+            lines.append(f"- {s.name}: {reason} · 모멘텀 {s.momentum_20d:.1f}% · 거래량 {s.volume_ratio:.2f}배")
+    else:
+        lines.append("- 현재 강한 매도 경고 종목 제한적")
+
+    lines.extend(["", "📝 관심 종목 메모"])
+    for ticker in ("005930.KS", "009830.KS", "005380.KS"):
+        name = SPECIAL_TRACKING[ticker]
+        s = next((x for x in signals if x.ticker == ticker), None)
+        if s:
+            lines.append(f"- {name}: 모멘텀 {s.momentum_20d:.1f}% · 거래량 {s.volume_ratio:.2f}배 · 리스크 {s.risk}")
+        else:
+            lines.append(f"- {name}: 데이터 없음")
+
+    return _fit_telegram_length("\n".join(lines), limit=2500)
+
+
 def save_report(report_text: str, out_dir: str = "reports") -> Path:
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     date_str = dt.datetime.now().strftime("%Y%m%d")
@@ -503,7 +590,7 @@ def send_telegram(report_text: str, cfg: RuntimeConfig) -> Tuple[bool, str]:
     if not token or not chat_id:
         return False, "Telegram 전송 실패: TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    data = urllib.parse.urlencode({"chat_id": chat_id, "text": report_text[:3800]}).encode("utf-8")
+    data = urllib.parse.urlencode({"chat_id": chat_id, "text": report_text[:2500]}).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -553,10 +640,11 @@ def run_pipeline() -> Path:
     signals = score_stocks(news, prices)
 
     report = format_report(news, signals, theme_count, fetch_status=fetch_status)
+    telegram_summary = format_telegram_summary(news, signals, theme_count, fetch_status=fetch_status)
     out = save_report(report)
 
     subject = f"[KR Stock AI] Daily Report {dt.datetime.now().strftime('%Y-%m-%d')}"
-    tg_ok, tg_msg = send_telegram(report, cfg)
+    tg_ok, tg_msg = send_telegram(telegram_summary, cfg)
     em_ok = send_email(subject, report, cfg)
 
     print(f"Report saved: {out}")
