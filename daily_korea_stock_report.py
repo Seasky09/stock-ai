@@ -12,6 +12,7 @@ import ssl
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+import certifi
 from dataclasses import dataclass
 from email.mime.text import MIMEText
 from html import unescape
@@ -593,7 +594,8 @@ def send_telegram(report_text: str, cfg: RuntimeConfig) -> Tuple[bool, str]:
     data = urllib.parse.urlencode({"chat_id": chat_id, "text": report_text[:2500]}).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(req, timeout=20, context=ssl_ctx) as resp:
             ok = 200 <= resp.status < 300
             return ok, ("Telegram 전송 성공" if ok else f"Telegram 전송 실패: HTTP {resp.status}")
     except Exception as exc:

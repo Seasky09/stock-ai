@@ -27,6 +27,7 @@
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env
 ```
 
@@ -77,10 +78,19 @@ Telegram 전송 동작:
    - 메모장으로 `.env`를 열어 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`를 입력.
 6. **실행**
    ```powershell
+   pip install -r requirements.txt
    python daily_korea_stock_report.py
    ```
 7. **결과 확인**
    - `reports\korea_stock_report_YYYYMMDD.md` 파일 열기.
+
+## Windows SSL 인증서 오류(TELEGRAM) 대응
+- 증상: Telegram 전송 시 `SSL: CERTIFICATE_VERIFY_FAILED`.
+- 조치: 코드에서 Telegram HTTPS 요청에 `certifi.where()` CA 번들을 명시적으로 사용하도록 반영되어 있습니다.
+- 필수: 아래를 먼저 실행해 `certifi`를 설치하세요.
+  ```bash
+  pip install -r requirements.txt
+  ```
 
 ## 자동 실행 (매일 아침 08:00 UTC 예시)
 ```bash

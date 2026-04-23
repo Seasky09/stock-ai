@@ -1,2 +1,1 @@
-# No third-party dependencies required for V1.
-# (Uses only Python standard library)
+certifi>=2024.8.30
